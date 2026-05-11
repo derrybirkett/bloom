@@ -1,0 +1,70 @@
+# Bloom Versions Manifest
+#
+# Maps released bloom versions to known-good combinations of the five repos.
+# Update when any individual repo's release changes a contract another repo
+# depends on.
+#
+# A consumer product can pin to a bloom version (e.g. "0.1.0") to lock all
+# five submodules to the combination listed below.
+
+bloom: "0.1.0"
+released: "2026-05-07"
+status: "initial"
+
+repos:
+  soul:
+    version: "0.1.0"
+    repo: "derrybirkett/soul"
+    role: "philosophy, values, methodology, accumulated wisdom"
+    consumes: []
+  idea:
+    version: "0.1.0"
+    repo: "derrybirkett/idea"
+    role: "per-product discovery and definition templates"
+    consumes: ["soul"]
+  stack:
+    version: "0.1.0"
+    repo: "derrybirkett/stack"
+    role: "tech defaults, configs, working starters"
+    consumes: ["soul"]
+  shulkerbox:
+    version: "0.1.0"
+    repo: "derrybirkett/shulkerbox"
+    role: "skills, hooks, scripts, operator agents, subagents"
+    consumes: ["soul", "stack"]
+  council:
+    version: "0.1.0"
+    repo: "derrybirkett/council"
+    role: "business advisors, governance, escalation"
+    consumes: ["soul"]
+
+# Compatibility rules:
+#   - All five repos at v0.1.0 form bloom v0.1.0.
+#   - Patch bumps in any repo are auto-compatible within the same bloom minor.
+#   - Minor bumps require a new bloom release row here.
+#   - Breaking changes require a major bump on the affected repo and a new
+#     bloom release listing the rebased combination.
+
+compatibility_notes: |
+  Initial release. No compatibility history yet. Future bloom releases append
+  rows here listing the exact (repo, version) tuples that have been validated
+  to work together.
+
+# Repos that bloom replaces. Listed for redirect clarity; not consumed.
+retired:
+  pip:
+    final_version: "3.0.0"
+    redirect: "Content distributed across soul, idea, council, shulkerbox. See pip/TOMBSTONE.md."
+  hatch:
+    final_version: "0.7.0"
+    redirect: |
+      Generator CLI retired. Heavyweight thesis preserved as stack/profiles/full.
+      Specific artifacts salvaged into stack and shulkerbox (Playwright auth-flow
+      test, CI workflow, UI component baseline, deployment matrix, production
+      readiness checklist). See hatch/TOMBSTONE.md for the full salvage map.
+  seed:
+    final_version: "0.2.0"
+    redirect: "Intent-parsing CLI retired. Templates moved to idea/. See seed/TOMBSTONE.md."
+  prefs:
+    final_version: "1.0.0"
+    redirect: "Methodology and philosophy moved to soul. Tech preferences moved to stack. See prefs/TOMBSTONE.md."

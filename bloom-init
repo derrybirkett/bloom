@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# bloom-init — bootstrap a new product from the bloom system.
+#
+# Usage:
+#   bloom-init <product-name>           # all five repos as submodules
+#   bloom-init <product-name> --minimal # only soul, stack, shulkerbox
+#
+# Environment overrides:
+#   BLOOM_SOURCE   Base URL/path for repos.
+#                  Default: https://github.com/derrybirkett
+#                  Local testing: file:///Users/you/Projects/Bloom
+#   BLOOM_REPOS    Comma-separated list of repos to mount (overrides defaults).
+#                  e.g. BLOOM_REPOS=soul,idea,stack
+#
+# The product is created as a new directory under the current working dir,
+# initialised as a git repo, with .bloom/ submodules and a notes/ scaffold.
+
+set -euo pipefail
+
+PRODUCT_NAME="${1:-}"
+MODE="${2:-full}"
+
+if [[ -z "$PRODUCT_NAME" ]]; then
+  echo "Usage: bloom-init <product-name> [--minimal]"
+  exit 1
+fi
+
+if [[ -d "$PRODUCT_NAME" ]]; then
+  echo "Error: directory '$PRODUCT_NAME' already exists." >&2
+  exit 1
+fi
+
+BLOOM_SOURCE="${BLOOM_SOURCE:-https://github.com/derrybirkett}"
+
+ALL_REPOS=(soul idea stack shulkerbox council)
+MINIMAL_REPOS=(soul stack shulkerbox)
+
+if [[ -n "${BLOOM_REPOS:-}" ]]; then
+  IFS=',' read -ra REPOS <<< "$BLOOM_REPOS"
+elif [[ "$MODE" == "--minimal" ]]; then
+  REPOS=("${MINIMAL_REPOS[@]}")
+else
+  REPOS=("${ALL_REPOS[@]}")
+fi
+
+mkdir -p "$PRODUCT_NAME"
+cd "$PRODUCT_NAME"
+
+git init -b main >/dev/null
+mkdir -p .bloom
+
+echo "Bootstrapping '$PRODUCT_NAME' from bloom"
+echo "Source: $BLOOM_SOURCE"
+echo "Repos:  ${REPOS[*]}"
+echo ""
+
+for repo in "${REPOS[@]}"; do
+  echo "  + adding .bloom/$repo"
+  # protocol.file.allow=always lets file:// submodules work for local testing;
+  # it is a no-op for https:// URLs.
+  git -c protocol.file.allow=always submodule add --quiet "$BLOOM_SOURCE/$repo" ".bloom/$repo"
+done
+
+# Scaffold per-product notes from shulkerbox templates if present
+if [[ -d ".bloom/shulkerbox/templates/notes" ]]; then
+  mkdir -p notes
+  cp -R .bloom/shulkerbox/templates/notes/. notes/
+  echo "  + scaffolded notes/ from shulkerbox/templates/notes"
+fi
+
+# Bootstrap commit happens FIRST, on main, before the no-main-commits hook is
+# installed. The bootstrap is the one allowed commit to main; everything after
+# must be on a branch.
+git add -A
+git commit -m "feat: bootstrap from bloom" --quiet
+
+# Install the no-main-commits hook from stack (applies to all subsequent commits)
+if [[ -f ".bloom/stack/configs/git/hooks/pre-commit-no-main" ]]; then
+  cp .bloom/stack/configs/git/hooks/pre-commit-no-main .git/hooks/pre-commit
+  chmod +x .git/hooks/pre-commit
+  echo "  + installed pre-commit hook (no-main-commits) — subsequent commits must be on a branch"
+fi
+
+echo ""
+echo "Done. Product '$PRODUCT_NAME' bootstrapped."
+echo ""
+echo "Next steps:"
+echo "  cd $PRODUCT_NAME"
+if [[ " ${REPOS[*]} " == *" idea "* ]]; then
+  echo "  cat .bloom/idea/templates/intent.md   # define what you're building"
+fi
+echo "  cat .bloom/stack/stack.yaml           # confirm the stack profile"
+if [[ " ${REPOS[*]} " == *" shulkerbox "* ]]; then
+  echo "  ls .bloom/shulkerbox/skills/          # see available skills"
+fi
+echo ""
