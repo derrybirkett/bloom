@@ -3,8 +3,13 @@
 # bloom-init — bootstrap a new product from the bloom system.
 #
 # Usage:
-#   bloom-init <product-name>           # all five repos as submodules
-#   bloom-init <product-name> --minimal # only soul, stack, shulkerbox
+#   bloom-init <product-name> [options]
+#
+# Options:
+#   -p, --parent DIR   Parent directory for the product (default: current dir)
+#   --minimal          Only mount soul, stack, shulkerbox
+#   --no-idea          Skip auto-scaffolding docs/ from idea templates
+#   -h, --help         Show this help
 #
 # Environment overrides:
 #   BLOOM_SOURCE   Base URL/path for repos.
@@ -13,24 +18,107 @@
 #   BLOOM_REPOS    Comma-separated list of repos to mount (overrides defaults).
 #                  e.g. BLOOM_REPOS=soul,idea,stack
 #
-# The product is created as a new directory under the current working dir,
-# initialised as a git repo, with .bloom/ submodules and a notes/ scaffold.
+# The product is created at <parent>/<product-name>, initialised as a git repo,
+# with .bloom/ submodules, an auto-scaffolded docs/ from idea templates, a
+# notes/ scaffold from shulkerbox (if mounted), and the no-main-commits hook.
 
 set -euo pipefail
 
-PRODUCT_NAME="${1:-}"
-MODE="${2:-full}"
+# ─────────────────────────────────────────────────────────────────────────────
+# Argument parsing
+# ─────────────────────────────────────────────────────────────────────────────
+PRODUCT_NAME=""
+PARENT_DIR="$PWD"
+MODE="full"
+NO_IDEA=0
+
+usage() {
+  sed -n '2,20p' "$0"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--parent)
+      PARENT_DIR="${2:-}"
+      [[ -z "$PARENT_DIR" ]] && { echo "Error: --parent requires a value" >&2; exit 1; }
+      shift 2
+      ;;
+    --minimal)
+      MODE="minimal"
+      shift
+      ;;
+    --no-idea)
+      NO_IDEA=1
+      shift
+      ;;
+    -h|--help)
+      usage; exit 0
+      ;;
+    -*)
+      echo "Error: unknown option '$1'" >&2; usage >&2; exit 1
+      ;;
+    *)
+      if [[ -z "$PRODUCT_NAME" ]]; then
+        PRODUCT_NAME="$1"
+      else
+        echo "Error: unexpected argument '$1'" >&2; exit 1
+      fi
+      shift
+      ;;
+  esac
+done
 
 if [[ -z "$PRODUCT_NAME" ]]; then
-  echo "Usage: bloom-init <product-name> [--minimal]"
+  usage >&2
   exit 1
 fi
 
-if [[ -d "$PRODUCT_NAME" ]]; then
-  echo "Error: directory '$PRODUCT_NAME' already exists." >&2
+# Normalise the parent dir
+PARENT_DIR="$(cd "$PARENT_DIR" 2>/dev/null && pwd)" || {
+  echo "Error: parent directory '$PARENT_DIR' does not exist or is not accessible" >&2
+  exit 1
+}
+
+TARGET_DIR="$PARENT_DIR/$PRODUCT_NAME"
+
+if [[ -d "$TARGET_DIR" ]]; then
+  echo "Error: directory '$TARGET_DIR' already exists." >&2
   exit 1
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Refusal guard: don't create products inside the bloom-system parent.
+# The bloom-system parent is identified by having bloom/, soul/, idea/, and
+# stack/ as direct subdirectories, with bloom/bloom-init executable.
+# ─────────────────────────────────────────────────────────────────────────────
+check_dir="$PARENT_DIR"
+while [[ "$check_dir" != "/" && -n "$check_dir" ]]; do
+  if [[ -f "$check_dir/bloom/bloom-init" \
+     && -d "$check_dir/soul" \
+     && -d "$check_dir/idea" \
+     && -d "$check_dir/stack" ]]; then
+    cat <<EOF >&2
+Error: refusing to create '$PRODUCT_NAME' inside the bloom-system parent.
+
+The bloom-system parent ($check_dir) is where the four bloom repos live as
+siblings. Products should live OUTSIDE it, typically as siblings to the
+bloom-system dir.
+
+Try:
+  cd $(dirname "$check_dir") && $0 $PRODUCT_NAME
+Or explicitly:
+  $0 $PRODUCT_NAME --parent $(dirname "$check_dir")
+EOF
+    exit 1
+  fi
+  parent_of_check="$(dirname "$check_dir")"
+  [[ "$parent_of_check" == "$check_dir" ]] && break
+  check_dir="$parent_of_check"
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resolve which repos to mount
+# ─────────────────────────────────────────────────────────────────────────────
 BLOOM_SOURCE="${BLOOM_SOURCE:-https://github.com/derrybirkett}"
 
 ALL_REPOS=(soul idea stack shulkerbox council)
@@ -38,44 +126,184 @@ MINIMAL_REPOS=(soul stack shulkerbox)
 
 if [[ -n "${BLOOM_REPOS:-}" ]]; then
   IFS=',' read -ra REPOS <<< "$BLOOM_REPOS"
-elif [[ "$MODE" == "--minimal" ]]; then
+elif [[ "$MODE" == "minimal" ]]; then
   REPOS=("${MINIMAL_REPOS[@]}")
 else
   REPOS=("${ALL_REPOS[@]}")
 fi
 
-mkdir -p "$PRODUCT_NAME"
-cd "$PRODUCT_NAME"
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap
+# ─────────────────────────────────────────────────────────────────────────────
+mkdir -p "$TARGET_DIR"
+cd "$TARGET_DIR"
 
 git init -b main >/dev/null
 mkdir -p .bloom
 
-echo "Bootstrapping '$PRODUCT_NAME' from bloom"
-echo "Source: $BLOOM_SOURCE"
-echo "Repos:  ${REPOS[*]}"
+echo "Bootstrapping '$PRODUCT_NAME'"
+echo "  target: $TARGET_DIR"
+echo "  source: $BLOOM_SOURCE"
+echo "  repos:  ${REPOS[*]}"
 echo ""
 
+# 1. Mount submodules
 for repo in "${REPOS[@]}"; do
-  echo "  + adding .bloom/$repo"
+  echo "  + mounting .bloom/$repo"
   # protocol.file.allow=always lets file:// submodules work for local testing;
   # it is a no-op for https:// URLs.
   git -c protocol.file.allow=always submodule add --quiet "$BLOOM_SOURCE/$repo" ".bloom/$repo"
 done
 
-# Scaffold per-product notes from shulkerbox templates if present
+# 2. Auto-scaffold docs/ from idea templates (the spine)
+if [[ "$NO_IDEA" -eq 0 && -d ".bloom/idea/templates" ]]; then
+  echo "  + scaffolding docs/ from idea templates"
+  mkdir -p docs docs/specs docs/stories docs/decisions
+
+  # Spine documents — one per product, pre-copied for filling in
+  for template in intent mission north-star product-surfaces architecture IA-graph; do
+    src=".bloom/idea/templates/${template}.md"
+    [[ -f "$src" ]] && cp "$src" "docs/${template}.md"
+  done
+
+  # docs/README — explains the structure
+  cat > docs/README.md <<'DOCS_README'
+# docs/
+
+Product-specific documentation, scaffolded from [`idea/`](../.bloom/idea/) at bootstrap.
+
+## Spine (one per product)
+
+Fill these in roughly in this order. Each builds on the previous.
+
+| File | Purpose |
+|---|---|
+| `intent.md` | The spark. Half-page. Decide pursue/park/drop |
+| `mission.md` | Who you serve, problem, solution, vision, non-goals |
+| `north-star.md` | The single metric that captures user value |
+| `product-surfaces.md` | The product's surfaces and routes |
+| `architecture.md` | System, auth flow, data flow diagrams |
+| `IA-graph.md` | Information architecture per surface |
+
+Update them as the product evolves. They are living documents.
+
+## Per-feature directories
+
+| Directory | What goes here |
+|---|---|
+| `specs/` | Behaviour-focused product specs, one per feature |
+| `stories/` | User stories, one per slice of value |
+| `decisions/` | Product-level ADRs (deviations from stack, technical choices) |
+
+Each subdirectory has a README explaining its workflow.
+
+## Refreshing templates
+
+If `idea/` ships new or improved templates and you want to refresh:
+
+```bash
+cp .bloom/idea/templates/<name>.md docs/<name>.md
+```
+
+Be careful: this overwrites your filled-in content. Diff first.
+DOCS_README
+
+  cat > docs/specs/README.md <<'SPECS_README'
+# specs/
+
+Behaviour-focused product specs. One per feature.
+
+## Workflow
+
+1. When starting a feature, copy the template:
+   ```bash
+   cp .bloom/idea/templates/spec.md docs/specs/SPEC-NNN-short-name.md
+   ```
+
+2. Number sequentially (SPEC-001, SPEC-002, ...) and use a short slug.
+
+3. Fill in the spec BEFORE writing code. The spec describes behaviour, not
+   implementation.
+
+4. Update the spec when behaviour changes. Code matches the spec, not the
+   other way around.
+
+5. Link to the matching `stories/STORY-NNN-...md` and any related decisions.
+SPECS_README
+
+  cat > docs/stories/README.md <<'STORIES_README'
+# stories/
+
+User stories. One per slice of value the product delivers.
+
+## Workflow
+
+1. Copy the template for each new story:
+   ```bash
+   cp .bloom/idea/templates/user-story.md docs/stories/STORY-NNN-short-name.md
+   ```
+
+2. Number sequentially (STORY-001, STORY-002, ...) and use a short slug.
+
+3. Each story links UP to a roadmap item and DOWN to a spec + acceptance criteria.
+
+4. No orphan stories. Every story serves the north star.
+STORIES_README
+
+  cat > docs/decisions/README.md <<'DECISIONS_README'
+# decisions/
+
+Product-level Architecture Decision Records (ADRs).
+
+## What goes here
+
+- Technical choices specific to this product.
+- Deviations from `.bloom/stack/stack.yaml` defaults.
+- Significant architectural calls (this database vs that one, this auth flow vs that one).
+
+## What does NOT go here
+
+- System-level decisions about bloom itself → those go in `.bloom/soul/decisions/` (via a PR upstream).
+- Stack-wide defaults → those go in `.bloom/stack/decisions/` (via a PR upstream).
+
+## Format
+
+Files named `NNNN-slug.md` with this structure:
+
+```
+# ADR-NNNN: Title
+
+Date: YYYY-MM-DD
+Status: Accepted | Proposed | Deprecated | Superseded by ADR-XXXX
+
+## Context
+## Decision
+## Consequences
+## Alternatives considered
+```
+
+## When to deviate from stack defaults
+
+When deviating from `.bloom/stack/stack.yaml`, write an ADR named:
+`NNNN-deviate-from-stack-<concern>.md` explaining the deviation. Three or more
+products deviating on the same concern is a signal to update stack itself.
+DECISIONS_README
+fi
+
+# 3. Scaffold notes/ from shulkerbox templates if mounted
 if [[ -d ".bloom/shulkerbox/templates/notes" ]]; then
   mkdir -p notes
   cp -R .bloom/shulkerbox/templates/notes/. notes/
   echo "  + scaffolded notes/ from shulkerbox/templates/notes"
 fi
 
-# Bootstrap commit happens FIRST, on main, before the no-main-commits hook is
-# installed. The bootstrap is the one allowed commit to main; everything after
-# must be on a branch.
+# 4. Bootstrap commit FIRST (on main, before the no-main-commits hook installs).
+#    The bootstrap is the one allowed commit to main; everything after must
+#    be on a branch.
 git add -A
 git commit -m "feat: bootstrap from bloom" --quiet
 
-# Install the no-main-commits hook from stack (applies to all subsequent commits)
+# 5. Install the no-main-commits hook from stack (applies to all subsequent commits)
 if [[ -f ".bloom/stack/configs/git/hooks/pre-commit-no-main" ]]; then
   cp .bloom/stack/configs/git/hooks/pre-commit-no-main .git/hooks/pre-commit
   chmod +x .git/hooks/pre-commit
@@ -83,11 +311,16 @@ if [[ -f ".bloom/stack/configs/git/hooks/pre-commit-no-main" ]]; then
 fi
 
 echo ""
-echo "Done. Product '$PRODUCT_NAME' bootstrapped."
+echo "Done. Product '$PRODUCT_NAME' bootstrapped at:"
+echo "  $TARGET_DIR"
 echo ""
 echo "Next steps:"
-echo "  cd $PRODUCT_NAME"
-if [[ " ${REPOS[*]} " == *" idea "* ]]; then
+echo "  cd $TARGET_DIR"
+echo "  git checkout -b feat/define-idea"
+if [[ "$NO_IDEA" -eq 0 ]]; then
+  echo "  \$EDITOR docs/intent.md            # define the spark first"
+  echo "  \$EDITOR docs/mission.md           # then the mission"
+else
   echo "  cat .bloom/idea/templates/intent.md   # define what you're building"
 fi
 echo "  cat .bloom/stack/stack.yaml           # confirm the stack profile"
