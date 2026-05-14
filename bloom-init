@@ -9,6 +9,7 @@
 #   -p, --parent DIR   Parent directory for the product (default: current dir)
 #   --minimal          Only mount soul, stack, shulkerbox
 #   --no-idea          Skip auto-scaffolding docs/ from idea templates
+#   -s, --story TEXT   Seed initial docs with a user story
 #   -h, --help         Show this help
 #
 # Environment overrides:
@@ -31,6 +32,7 @@ PRODUCT_NAME=""
 PARENT_DIR="$PWD"
 MODE="full"
 NO_IDEA=0
+STORY_TEXT=""
 
 usage() {
   sed -n '2,20p' "$0"
@@ -50,6 +52,11 @@ while [[ $# -gt 0 ]]; do
     --no-idea)
       NO_IDEA=1
       shift
+      ;;
+    -s|--story)
+      STORY_TEXT="${2:-}"
+      [[ -z "$STORY_TEXT" ]] && { echo "Error: --story requires a value" >&2; exit 1; }
+      shift 2
       ;;
     -h|--help)
       usage; exit 0
@@ -288,6 +295,17 @@ When deviating from `.bloom/stack/stack.yaml`, write an ADR named:
 `NNNN-deviate-from-stack-<concern>.md` explaining the deviation. Three or more
 products deviating on the same concern is a signal to update stack itself.
 DECISIONS_README
+
+  if [[ -n "$STORY_TEXT" ]]; then
+    echo "  + seeding docs/intent.md and docs/stories/STORY-001-initial.md with provided story"
+    echo -e "# Intent\n\n**The Spark:**\n$STORY_TEXT\n\n*Decision: Pursue*" > docs/intent.md
+    cat > docs/stories/STORY-001-initial.md <<STORY_EOF
+# STORY-001: Initial Concept
+
+## Story
+$STORY_TEXT
+STORY_EOF
+  fi
 fi
 
 # 3. Scaffold notes/ from shulkerbox templates if mounted
@@ -301,7 +319,9 @@ fi
 #    The bootstrap is the one allowed commit to main; everything after must
 #    be on a branch.
 git add -A
-git commit -m "feat: bootstrap from bloom" --quiet
+COMMIT_MSG="feat: bootstrap from bloom"
+[[ -n "$STORY_TEXT" ]] && COMMIT_MSG="feat: bootstrap from bloom with initial story"
+git commit -m "$COMMIT_MSG" --quiet
 
 # 5. Install the no-main-commits hook from stack (applies to all subsequent commits)
 if [[ -f ".bloom/stack/configs/git/hooks/pre-commit-no-main" ]]; then
