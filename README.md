@@ -71,8 +71,8 @@ Single source of truth per concern. If content cannot be placed in exactly one r
 
 ```bash
 # Clone the hub
-git clone https://github.com/derrybirkett/bloom ~/Projects/bloom
-cd ~/Projects/bloom
+git clone https://github.com/derrybirkett/bloom
+cd bloom
 
 # Initialise a new product
 ./bloom-init my-new-product

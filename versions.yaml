@@ -7,9 +7,9 @@
 # A consumer product can pin to a bloom version (e.g. "0.1.0") to lock all
 # five submodules to the combination listed below.
 
-bloom: "0.1.0"
-released: "2026-05-07"
-status: "initial"
+bloom: "0.2.0"
+released: "2026-05-19"
+status: "current"
 
 repos:
   soul:
@@ -28,7 +28,7 @@ repos:
     role: "tech defaults, configs, working starters"
     consumes: ["soul"]
   shulkerbox:
-    version: "0.1.0"
+    version: "1.1.1"
     repo: "derrybirkett/shulkerbox"
     role: "skills, hooks, scripts, operator agents, subagents"
     consumes: ["soul", "stack"]
@@ -39,16 +39,32 @@ repos:
     consumes: ["soul"]
 
 # Compatibility rules:
-#   - All five repos at v0.1.0 form bloom v0.1.0.
 #   - Patch bumps in any repo are auto-compatible within the same bloom minor.
-#   - Minor bumps require a new bloom release row here.
+#   - Minor bumps require a new bloom release row in `releases` below.
 #   - Breaking changes require a major bump on the affected repo and a new
 #     bloom release listing the rebased combination.
 
+# Release history. One row per bloom release; each tuple is the combination
+# validated to work together at that release. Newest first.
+releases:
+  - bloom: "0.2.0"
+    released: "2026-05-19"
+    repos: { soul: "0.1.0", idea: "0.1.0", stack: "0.1.0", shulkerbox: "1.1.1", council: "0.1.0" }
+  - bloom: "0.1.1"
+    released: "2026-05-12"
+    repos: { soul: "0.1.0", idea: "0.1.0", stack: "0.1.0", shulkerbox: "1.1.1", council: "0.1.0" }
+  - bloom: "0.1.0"
+    released: "2026-05-11"
+    repos: { soul: "0.1.0", idea: "0.1.0", stack: "0.1.0", shulkerbox: "1.1.0", council: "0.1.0" }
+    note: |
+      Originally published claiming shulkerbox 0.1.0, but shulkerbox was
+      already at v1.1.0 by this date. Corrected retroactively 2026-06-10.
+
 compatibility_notes: |
-  Initial release. No compatibility history yet. Future bloom releases append
-  rows here listing the exact (repo, version) tuples that have been validated
-  to work together.
+  History backfilled 2026-06-10 after the manifest drifted from the actual
+  tags. Rule going forward: tagging any repo with a minor or major bump means
+  appending a row here in the same session (enforced by the wrap-up skill's
+  manifest drift check).
 
 # Repos that bloom replaces. Listed for redirect clarity; not consumed.
 retired:
