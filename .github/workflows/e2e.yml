@@ -1,0 +1,30 @@
+name: e2e
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  bloom-init:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bloom
+
+      # Assemble the bloom-system workspace: the five member repos as
+      # siblings of the bloom checkout, so file:// submodule mounts work.
+      - name: Assemble bloom workspace
+        run: |
+          for repo in soul idea stack shulkerbox council; do
+            git clone --quiet "https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}" "$repo"
+          done
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "bloom-ci"
+          git config --global user.email "ci@bloom.invalid"
+
+      - name: Run end-to-end test
+        run: BLOOM_SOURCE="file://$GITHUB_WORKSPACE" bloom/test/e2e.sh
