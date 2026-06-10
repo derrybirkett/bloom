@@ -15,15 +15,16 @@
 # Environment overrides:
 #   BLOOM_SOURCE   Base URL/path for repos.
 #                  Default: https://github.com/derrybirkett
-#                  Local testing: file:///Users/you/Projects/Bloom
+#                  Local testing: file:///path/to/your/bloom-workspace
 #   BLOOM_REPOS    Comma-separated list of repos to mount (overrides defaults).
 #                  e.g. BLOOM_REPOS=soul,idea,stack
 #
 # The product is created at <parent>/<product-name>, initialised as a git repo,
 # with .bloom/ submodules, an auto-scaffolded docs/ from idea templates, a
-# notes/ scaffold from shulkerbox (if mounted), and the no-main-commits hook.
+# notes/ scaffold from shulkerbox (if mounted), and the no-main git hooks
+# (pre-commit and pre-push).
 
-set -euo pipefail
+set -Eeuo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Argument parsing
@@ -35,7 +36,9 @@ NO_IDEA=0
 STORY_TEXT=""
 
 usage() {
-  sed -n '2,20p' "$0"
+  # Print the full header comment block (everything between the shebang and
+  # the first non-comment line), stripping the leading "# ".
+  awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -107,7 +110,7 @@ while [[ "$check_dir" != "/" && -n "$check_dir" ]]; do
     cat <<EOF >&2
 Error: refusing to create '$PRODUCT_NAME' inside the bloom-system parent.
 
-The bloom-system parent ($check_dir) is where the four bloom repos live as
+The bloom-system parent ($check_dir) is where the five bloom repos live as
 siblings. Products should live OUTSIDE it, typically as siblings to the
 bloom-system dir.
 
@@ -143,6 +146,16 @@ fi
 # Bootstrap
 # ─────────────────────────────────────────────────────────────────────────────
 mkdir -p "$TARGET_DIR"
+
+# Clean up the half-built product if anything below fails, so a re-run
+# doesn't hit "directory already exists".
+cleanup_on_error() {
+  echo "Error: bootstrap failed — removing partial product at $TARGET_DIR" >&2
+  cd "$PARENT_DIR"
+  rm -rf "$TARGET_DIR"
+}
+trap cleanup_on_error ERR
+
 cd "$TARGET_DIR"
 
 git init -b main >/dev/null
@@ -323,11 +336,18 @@ COMMIT_MSG="feat: bootstrap from bloom"
 [[ -n "$STORY_TEXT" ]] && COMMIT_MSG="feat: bootstrap from bloom with initial story"
 git commit -m "$COMMIT_MSG" --quiet
 
-# 5. Install the no-main-commits hook from stack (applies to all subsequent commits)
+# 5. Install the no-main hooks from stack (apply to all subsequent commits).
+#    pre-commit blocks committing on main; pre-push is the backstop that
+#    blocks pushing main even if the commit hook was bypassed.
 if [[ -f ".bloom/stack/configs/git/hooks/pre-commit-no-main" ]]; then
   cp .bloom/stack/configs/git/hooks/pre-commit-no-main .git/hooks/pre-commit
   chmod +x .git/hooks/pre-commit
   echo "  + installed pre-commit hook (no-main-commits) — subsequent commits must be on a branch"
+fi
+if [[ -f ".bloom/stack/configs/git/hooks/pre-push-no-main" ]]; then
+  cp .bloom/stack/configs/git/hooks/pre-push-no-main .git/hooks/pre-push
+  chmod +x .git/hooks/pre-push
+  echo "  + installed pre-push hook (no-main-push) — main cannot be pushed directly"
 fi
 
 echo ""
